@@ -64,7 +64,7 @@ class GCPathFollower:
     JOINT_STATE_TOPIC = '/joint_states'
     JOINT_POS_ACTION = 'jaco_arm/arm_controller/trajectory'               # This Action Call produces jerky
     # trajectory
-    JOINT_VEL_ACTION = 'jaco_arm/arm_controller_new/trajectory'#'jaco_arm/joint_velocity_controller/trajectory'     # This Action Call smooths the trajectory
+    JOINT_VEL_ACTION = 'jaco_arm/timed_arm_controller/trajectory'#'jaco_arm/joint_velocity_controller/trajectory'     # This Action Call smooths the trajectory
     PREFIX = 'jaco_'                                                        # Set Prefix to 'right_'/'jaco_'
     MAX_JOINT_VEL = 0.5                                                     # Dictates time between points in position control
 
@@ -74,7 +74,7 @@ class GCPathFollower:
     POSE_TOLERANCE = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]              # Allowed tolerance in position and rotation
 
     r = rospkg.RosPack()
-    PACKAGE_PATH = r.get_path('rail_generalized_cylinder')
+    PACKAGE_PATH = r.get_path('path_follower')
 
     def __init__(self):
 

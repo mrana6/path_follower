@@ -74,7 +74,7 @@ class GCPathFollower:
     POSE_TOLERANCE = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]              # Allowed tolerance in position and rotation
 
     r = rospkg.RosPack()
-    PACKAGE_PATH = r.get_path('rail_generalized_cylinder')
+    PACKAGE_PATH = r.get_path('path_follower')
 
     def __init__(self):
 
