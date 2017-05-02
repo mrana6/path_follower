@@ -16,14 +16,55 @@ import actionlib
 import math
 import trajectory_msgs.msg
 
+def simplify_angle(angle):
+    simplified_angle = []
+    for i in range(0,len(angle)):
+        previous_rev = math.floor(angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
+        next_rev = math.ceil(angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
+        # if math.fabs(angle[i] - previous_rev) < math.fabs(angle[i] - next_rev):
+        #     simplified_angle.append(angle[i]-previous_rev)
+        # else:
+        #     simplified_angle.append(angle[i]-next_rev)
+        if angle[i] <=0:
+            simplified_angle.append(angle[i]-next_rev)
+        else:
+            simplified_angle.append(angle[i]-previous_rev)
+    return simplified_angle
+
+
+def normalize_angle(angle):
+    normalized_angle = []
+    for i in range(0,len(angle)):
+        new_curr_angle = angle[i]
+        while new_curr_angle<=-math.pi:
+            new_curr_angle = new_curr_angle + 2*math.pi
+        while new_curr_angle>math.pi:
+            new_curr_angle = new_curr_angle - 2*math.pi
+        normalized_angle.append(new_curr_angle)
+    return normalized_angle
+
+def find_nearby_angle(desired_angle, curr_angle):
+    nearby_angle = curr_angle
+    desired_angle = simplify_angle(desired_angle)
+    for i in range(0, len(curr_angle)):
+        previous_rev = math.floor(curr_angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
+        next_rev = math.ceil(curr_angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
+        if curr_angle[i] <=0:
+            nearby_angle[i] = next_rev + desired_angle[i]
+        else:
+            nearby_angle[i] = previous_rev + desired_angle[i]
+
+    return nearby_angle
+
 
 class GCPathFollower:
     # User Inputs
     DATA_NAME = 'dataset4_3.txt'                                            # WARNING: Check the file is in data folder
     TRAC_IK_SERVICE_NAME = '/hlpr_trac_ik'
     JOINT_STATE_TOPIC = '/joint_states'
-    JOINT_POS_ACTION = 'jaco_arm/arm_controller/trajectory'               # This Action Call produces jerky trajectory
-    JOINT_VEL_ACTION = 'jaco_arm/joint_velocity_controller/trajectory'     # This Action Call smooths the trajectory
+    JOINT_POS_ACTION = 'jaco_arm/arm_controller/trajectory'               # This Action Call produces jerky
+    # trajectory
+    JOINT_VEL_ACTION = 'jaco_arm/timed_arm_controller/trajectory'#'jaco_arm/joint_velocity_controller/trajectory'     # This Action Call smooths the trajectory
     PREFIX = 'jaco_'                                                        # Set Prefix to 'right_'/'jaco_'
     MAX_JOINT_VEL = 0.5                                                     # Dictates time between points in position control
 
@@ -211,38 +252,21 @@ class GCPathFollower:
         trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_3_joint')
 
         trajActionGoal.trajectory.points = []
-        # set the first trajectory point to the current position
-        tempTrajPoint = trajectory_msgs.msg.JointTrajectoryPoint()
-        tempTrajPoint.positions = self.jointStateArm
-        tempTrajPoint.velocities = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        tempTrajPoint.time_from_start = rospy.Duration(0.25)
-        trajActionGoal.trajectory.points.append(tempTrajPoint)
-
-        timeFromStart = 0.25
+        timeFromStart = 1.0
 
         # fill in the joint positions (velocities of 0 mean that the arm
         # will try to stop briefly at each waypoint)
-
-
         for j in range(len(self.jointTrajectory)):
-            maxJointMove = 0
-            for i in range(0, 5):
-                jointMove = math.fabs(self.jointTrajectory[j].positions[i]
-                                      - trajActionGoal.trajectory.points[-1].positions[i])
-                if jointMove > maxJointMove:
-                    maxJointMove = jointMove
-
-            seconds = maxJointMove/self.MAX_JOINT_VEL
+            seconds = 0.04                                      #set this to delta_t
             timeFromStart = timeFromStart + seconds
 
             tempTrajPoint = trajectory_msgs.msg.JointTrajectoryPoint()
             tempTrajPoint.positions = self.jointTrajectory[j].positions
-            tempTrajPoint.velocities = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]                       #TODO: Check the effect of this
             tempTrajPoint.time_from_start = rospy.Duration(timeFromStart)
             trajActionGoal.trajectory.points.append(tempTrajPoint)
+            print tempTrajPoint.positions
 
-
-        trajActionGoal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.25)
+        trajActionGoal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(1.0)
 
         rospy.loginfo('Sending goal to joint_trajectory_action')
         trajActionClient.send_goal(trajActionGoal)
