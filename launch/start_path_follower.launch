@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<launch>
+
+    <!-- Parameters for path follower -->
+    <arg name="control_mode" default="velocity"/>
+    <arg name="data_name" default="dataset4_3.txt"/>
+    <arg name="data_mode" default="cartesian"/>
+    <arg name="arm_prefix" default="jaco_"/>
+
+    <node name="follow_gc_path" pkg="rail_generalized_cylinder" type="follow_gc_path.py" output="screen">
+        <param name="control_mode" value="$(arg control_mode)"/>
+        <param name="data_name" value="$(arg data_name)"/>
+        <param name="data_mode" value="$(arg data_mode)"/>
+        <param name="arm_prefix" value="$(arg arm_prefix)"/>
+    </node>
+
+</launch>
