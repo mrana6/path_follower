@@ -4,7 +4,7 @@
 The package currently allows loading cartesian-space (converted to joint-space using hlpr_trac_ik) or joint-space trajectory and executing it using veclociy or position control (using wpi_jaco_wrapper)
 
 # Dependencies
-1. wpi_jaco_wrapper (at mrana6)
+1. wpi_jaco_wrapper (pull the latest version on develop branch)
 2. jaco2_description (at gt-rail_internal/codebase/davidkent/jaco2_description)
 3. jaco2_bringup (clone from here)
 4. hlpr_trac_ik (at HLP-R/hlpr_manipulation/hlpr_trac_ik)
