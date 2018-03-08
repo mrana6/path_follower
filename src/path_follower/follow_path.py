@@ -3,6 +3,8 @@
 import rospy
 import rospkg
 import numpy
+import operator
+
 from numpy.linalg.linalg import dot
 from numpy.linalg import norm
 
@@ -16,62 +18,23 @@ import actionlib
 import math
 import trajectory_msgs.msg
 
-def simplify_angle(angle):
-    simplified_angle = []
-    for i in range(0,len(angle)):
-        previous_rev = math.floor(angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
-        next_rev = math.ceil(angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
-        # if math.fabs(angle[i] - previous_rev) < math.fabs(angle[i] - next_rev):
-        #     simplified_angle.append(angle[i]-previous_rev)
-        # else:
-        #     simplified_angle.append(angle[i]-next_rev)
-        if angle[i] <=0:
-            simplified_angle.append(angle[i]-next_rev)
-        else:
-            simplified_angle.append(angle[i]-previous_rev)
-    return simplified_angle
+import intera_interface
 
 
-def normalize_angle(angle):
-    normalized_angle = []
-    for i in range(0,len(angle)):
-        new_curr_angle = angle[i]
-        while new_curr_angle<=-math.pi:
-            new_curr_angle = new_curr_angle + 2*math.pi
-        while new_curr_angle>math.pi:
-            new_curr_angle = new_curr_angle - 2*math.pi
-        normalized_angle.append(new_curr_angle)
-    return normalized_angle
-
-def find_nearby_angle(desired_angle, curr_angle):
-    nearby_angle = curr_angle
-    desired_angle = simplify_angle(desired_angle)
-    for i in range(0, len(curr_angle)):
-        previous_rev = math.floor(curr_angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
-        next_rev = math.ceil(curr_angle[i] / (2.0 * math.pi)) * 2.0 * math.pi
-        if curr_angle[i] <=0:
-            nearby_angle[i] = next_rev + desired_angle[i]
-        else:
-            nearby_angle[i] = previous_rev + desired_angle[i]
-
-    return nearby_angle
-
-
-class GCPathFollower:
+class PathFollower:
     # User Inputs
-    DATA_NAME = 'dataset4_3.txt'                                            # WARNING: Check the file is in data folder
+    DATA_NAME = 'test.txt'                                                   # WARNING: Check the file is in data folder
     TRAC_IK_SERVICE_NAME = '/hlpr_trac_ik'
-    JOINT_STATE_TOPIC = '/joint_states'
-    JOINT_POS_ACTION = 'jaco_arm/arm_controller/trajectory'               # This Action Call produces jerky
-    # trajectory
-    JOINT_VEL_ACTION = 'jaco_arm/timed_arm_controller/trajectory'#'jaco_arm/joint_velocity_controller/trajectory'     # This Action Call smooths the trajectory
-    PREFIX = 'jaco_'                                                        # Set Prefix to 'right_'/'jaco_'
-    MAX_JOINT_VEL = 0.5                                                     # Dictates time between points in position control
+    JOINT_STATE_TOPIC = '/robot/joint_states'
+    JOINT_VEL_ACTION = '/robot/limb/right/follow_joint_trajectory'           # This Action Call smooths the trajectory
+    PREFIX = 'right_'                                                        # Set Prefix to 'right_'/'jaco_'
+
 
     # Minimum threshold for a point to be included in trajectory. Identical adjacent points cause velocity control failure
-    MIN_POS_DIFF = 0.01
-    MIN_ANG_DIFF = 0.01
-    POSE_TOLERANCE = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]              # Allowed tolerance in position and rotation
+    MIN_POS_DIFF = 0.0
+    MIN_ANG_DIFF = 0.0
+    MIN_JOINT_DIFF = 0.0
+    POSE_TOLERANCE = [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001]              # Allowed tolerance in position and rotation
 
     r = rospkg.RosPack()
     PACKAGE_PATH = r.get_path('path_follower')
@@ -79,76 +42,83 @@ class GCPathFollower:
     def __init__(self):
 
         # Initialize Node
-        rospy.init_node('follow_gc_path', anonymous=False)
+        rospy.init_node('path_follower', anonymous=False)
 
-        self.controlMode = rospy.get_param('~control_mode', 'velocity')
         self.dataName = rospy.get_param('~data_name', self.DATA_NAME)
         self.dataMode = rospy.get_param('~data_mode', 'cartesian')
         self.armPrefix = rospy.get_param('~arm_prefix', self.PREFIX)
 
-        self.jointStateMsg = None
         self.jointStateArm = None
         self.ikSuccessFlag = False
-        self.jointTrajectory = None
+
+        self.jointTrajectory = []
         self.goalList = []
+        self.timeList = []
 
         self.dataPath = self.PACKAGE_PATH + '/data_cartesian/' + self.dataName
         self.jointDataPath = self.PACKAGE_PATH + '/data_joints/' + self.dataName
 
-        if self.controlMode == 'velocity':
-            self.jointTrajAction = self.JOINT_VEL_ACTION
-        elif self.controlMode == 'position':
-            self.jointTrajAction = self.JOINT_POS_ACTION
-        else:
-            rospy.logerr('Invalid Control Mode - Valid Inputs: velocity/position')
+        self.jointTrajAction = self.JOINT_VEL_ACTION
+
+        self.trajActionClient = actionlib.SimpleActionClient(self.jointTrajAction,
+                                                        control_msgs.msg.FollowJointTrajectoryAction)
+        try:
+            self.trajActionClient.wait_for_server()
+        except rospy.ROSException, e:
+            rospy.logerr("Timed Out waiting for Trajectory Follower Action Server: %s", str(e))
+
+
+        jointStateSub = rospy.Subscriber(self.JOINT_STATE_TOPIC,
+                                         sensor_msgs.msg.JointState,
+                                         self.jointStateCallback)
+        try:
+            rospy.wait_for_message(self.JOINT_STATE_TOPIC,
+                                   sensor_msgs.msg.JointState, timeout=2)
+        except rospy.ROSException, e:
+            rospy.logerr("Joint State Callback Time Out: %s", str(e))
+
 
         if self.dataMode == 'cartesian':
             self.loadCartesianPath()
             self.findJointTrajectory()
+            self.gotoInit()
             self.executeTrajectory()
         elif self.dataMode == 'joints':
             self.loadJointTrajectory()
+            self.gotoInit()
             self.executeTrajectory()
         else:
             rospy.logerr('Invalid Data Mode - Valid Inputs: cartesian/joints')
 
-    def jointStateCallback(self, receivedJointStateMsg):
-        self.jointStateMsg = receivedJointStateMsg
 
+
+    def jointStateCallback(self, jointStateMsg):
         # Populating joint names
-        if self.jointStateMsg is not None:
-            for numJoint in range(len(self.jointStateMsg.name)):
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'shoulder_pan_joint':
-                    shoulderPanIndex = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'shoulder_lift_joint':
-                    shoulderLiftIndex = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'elbow_joint':
-                    elbowIndex = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'wrist_1_joint':
-                    wrist1Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'wrist_2_joint':
-                    wrist2Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'wrist_3_joint':
-                    wrist3Index = numJoint
-
-            self.jointStateArm = [self.jointStateMsg.position[shoulderPanIndex],
-                                  self.jointStateMsg.position[shoulderLiftIndex],
-                                  self.jointStateMsg.position[elbowIndex],
-                                  self.jointStateMsg.position[wrist1Index],
-                                  self.jointStateMsg.position[wrist2Index],
-                                  self.jointStateMsg.position[wrist3Index]]
+        if len(jointStateMsg.position)>1:
+            self.jointStateArm = [jointStateMsg.position[1],
+                                  jointStateMsg.position[2],
+                                  jointStateMsg.position[3],
+                                  jointStateMsg.position[4],
+                                  jointStateMsg.position[5],
+                                  jointStateMsg.position[6],
+                                  jointStateMsg.position[7]]
 
     def loadCartesianPath(self):
         """
         Loads the Path from file specified earlier
         """
         rospy.loginfo('Loading Data ...')
-        data = numpy.loadtxt(self.dataPath)
+        time = numpy.loadtxt(self.dataPath, delimiter=',', usecols=(0,))
+        time = time - time[0]
+
+        data = numpy.loadtxt(self.dataPath, delimiter=',', usecols=(1,2,3,4,5,6,7))
 
         posList = []
         quatList = []
         posList.append(data[0,0:3])
         quatList.append(data[0,3:7])
+
+        self.timeList.append(time[0])
 
         # Check to send waypoint only if they are different (trajectory execution fails else)
         for i in range(1,len(data)):
@@ -161,6 +131,7 @@ class GCPathFollower:
             if posDiff >= self.MIN_POS_DIFF or orientDiff >= self.MIN_ANG_DIFF:
                 posList.append(data[i,0:3])
                 quatList.append(data[i,3:7])
+                self.timeList.append(time[i])
 
         # Populating waypoint list
         for i in range(len(posList)):
@@ -174,26 +145,36 @@ class GCPathFollower:
         Loads a pre-computed joint trajectory if required
         """
         rospy.loginfo('Loading Joint Data ...')
-        data = numpy.loadtxt(self.jointDataPath)
+        time = numpy.loadtxt(self.jointDataPath, delimiter=',', usecols=(0,))
+        data = numpy.loadtxt(self.jointDataPath, delimiter=',', usecols=(1,2,3,4,5,6,7))
 
-        loadedTraj = []
+        jointList = []
+        jointList.append(data[0,:])
 
-        for i in range(len(data)):
-            tempTrajPoint = trajectory_msgs.msg.JointTrajectoryPoint()
-            tempTrajPoint.positions = data[i]
-            loadedTraj.append(tempTrajPoint)
+        time = time - time[0]
 
-        self.jointTrajectory = loadedTraj
+        self.timeList.append(time[0])
 
+        # Check to append joint values only when they are different
+        for i in range(1, len(data)):
+            currJoint = jointList[-1]
+
+            jointDiff = norm(data[i]-currJoint)
+
+            if jointDiff >= self.MIN_JOINT_DIFF:
+                jointList.append(data[i])
+                self.timeList.append(time[i])
+
+        # Populating joint trajectory
+        for i in range(len(jointList)):
+            trajPoint = trajectory_msgs.msg.JointTrajectoryPoint(positions=jointList[i])
+            self.jointTrajectory.append(trajPoint)
+       
 
     def findJointTrajectory(self):
         """
         Calls hlpr_trac_IK to find joint trajectory
         """
-
-        jointStateSub = rospy.Subscriber(self.JOINT_STATE_TOPIC,
-                                         sensor_msgs.msg.JointState,
-                                         self.jointStateCallback)
         try:
             rospy.wait_for_message(self.JOINT_STATE_TOPIC,
                                    sensor_msgs.msg.JointState, timeout=2)
@@ -219,59 +200,54 @@ class GCPathFollower:
         else:
             rospy.logerr('IK Failed to Find Trajectory - Try Increasing POSE_TOLERANCE')
 
+    def gotoInit(self):
+        limb = intera_interface.Limb('right')
+        initPoint = self.jointTrajectory[0].positions
+        
+        init = {'right_j0': initPoint[0], 'right_j1': initPoint[1],'right_j2': initPoint[2], \
+        'right_j3': initPoint[3], 'right_j4': initPoint[4], 'right_j5': initPoint[5], 'right_j6': initPoint[6]}
+
+        limb.move_to_joint_positions(init)
+
+    def preemptExecution(self):
+        if (self.trajActionClient.gh is not None and
+            self.trajActionClient.get_state() == actionlib.GoalStatus.ACTIVE):
+            self.trajActionClient.cancel_goal()
+
+        #delay to allow for terminating handshake
+        rospy.sleep(0.1)
 
     def executeTrajectory(self):
         """
         Passes the trajectory to controller
         """
 
-        jointStateSub = rospy.Subscriber(self.JOINT_STATE_TOPIC,
-                                         sensor_msgs.msg.JointState,
-                                         self.jointStateCallback)
-        try:
-            rospy.wait_for_message(self.JOINT_STATE_TOPIC,
-                                   sensor_msgs.msg.JointState, timeout=2)
-        except rospy.ROSException, e:
-            rospy.logerr("Joint State Callback Time Out: %s", str(e))
-
-        trajActionClient = actionlib.SimpleActionClient(self.jointTrajAction,
-                                                        control_msgs.msg.FollowJointTrajectoryAction)
-        try:
-            trajActionClient.wait_for_server()
-        except rospy.ROSException, e:
-            rospy.logerr("Timed Out waiting for Trajectory Follower Action Server: %s", str(e))
-
-
         trajActionGoal = control_msgs.msg.FollowJointTrajectoryGoal()
 
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'shoulder_pan_joint')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'shoulder_lift_joint')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'elbow_joint')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_1_joint')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_2_joint')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_3_joint')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j0')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j1')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j2')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j3')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j4')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j5')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'j6')
+
 
         trajActionGoal.trajectory.points = []
-        timeFromStart = 1.0
-
-        # fill in the joint positions (velocities of 0 mean that the arm
-        # will try to stop briefly at each waypoint)
         for j in range(len(self.jointTrajectory)):
-            seconds = 0.04                                      #set this to delta_t
-            timeFromStart = timeFromStart + seconds
-
             tempTrajPoint = trajectory_msgs.msg.JointTrajectoryPoint()
             tempTrajPoint.positions = self.jointTrajectory[j].positions
-            tempTrajPoint.time_from_start = rospy.Duration(timeFromStart)
+            tempTrajPoint.time_from_start = rospy.Duration(self.timeList[j])
             trajActionGoal.trajectory.points.append(tempTrajPoint)
-            print tempTrajPoint.positions
 
         trajActionGoal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(1.0)
 
-        rospy.loginfo('Sending goal to joint_trajectory_action')
-        trajActionClient.send_goal(trajActionGoal)
+        rospy.on_shutdown(self.preemptExecution)
 
-        trajActionClient.wait_for_result()
+        rospy.loginfo('Sending goal to joint_trajectory_action')
+        self.trajActionClient.send_goal(trajActionGoal)
+
+        self.trajActionClient.wait_for_result()
 
         try:
             rospy.wait_for_message(self.JOINT_STATE_TOPIC,
@@ -279,11 +255,19 @@ class GCPathFollower:
         except rospy.ROSException, e:
             rospy.logerr("Joint State Callback Time Out: %s", str(e))
 
-        rospy.loginfo('joint angles after trajectory: ' + str(self.jointStateArm))
 
-        trajActionResult = trajActionClient.get_result()
-        #print trajActionResult
+        finalError = map(operator.sub, self.jointStateArm, list(self.jointTrajectory[-1].positions))
 
+        rospy.loginfo('Final Point Error: ' + ','.join([str(x) for x in finalError]))
+
+        trajActionResult = (self.trajActionClient.get_result().error_code == 0)
+
+        if trajActionResult:
+            rospy.loginfo('Trajectory execution successful!')
+            return True
+        else:
+            rospy.logerr('Trajectory execution failure!')
+            return False
 
 if __name__ == '__main__':
-    trajFollower = GCPathFollower()
+    trajFollower = PathFollower()
