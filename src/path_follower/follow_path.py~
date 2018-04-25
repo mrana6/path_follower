@@ -8,7 +8,7 @@ from numpy.linalg import norm
 
 
 import geometry_msgs.msg
-# import hlpr_trac_ik.srv
+import hlpr_trac_ik.srv
 import sensor_msgs.msg
 
 import control_msgs.msg
@@ -59,19 +59,19 @@ def find_nearby_angle(desired_angle, curr_angle):
 
 class GCPathFollower:
     # User Inputs
-    DATA_NAME = 'demo1.txt'                                            # WARNING: Check the file is in data folder
+    DATA_NAME = 'dataset4_3.txt'                                            # WARNING: Check the file is in data folder
     TRAC_IK_SERVICE_NAME = '/hlpr_trac_ik'
     JOINT_STATE_TOPIC = '/joint_states'
-    JOINT_POS_ACTION = 'hlpr_trajectory_controller/trajectory'               # This Action Call produces jerky
+    JOINT_POS_ACTION = 'jaco_arm/arm_controller/trajectory'               # This Action Call produces jerky
     # trajectory
-    JOINT_VEL_ACTION = 'hlpr_trajectory_controller/timed_trajectory'#'jaco_arm/joint_velocity_controller/trajectory'     # This Action Call smooths the trajectory
-    PREFIX = 'j2s7s300_'                                                        # Set Prefix to 'right_'/'jaco_'
+    JOINT_VEL_ACTION = 'jaco_arm/joint_velocity_controller/trajectory' #'jaco_arm/timed_arm_controller/trajectory'  # This Action Call smooths the trajectory
+    PREFIX = 'jaco_'                                                        # Set Prefix to 'right_'/'jaco_'
     MAX_JOINT_VEL = 0.5                                                     # Dictates time between points in position control
 
     # Minimum threshold for a point to be included in trajectory. Identical adjacent points cause velocity control failure
     MIN_POS_DIFF = 0.01
     MIN_ANG_DIFF = 0.01
-    POSE_TOLERANCE = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001]              # Allowed tolerance in position and rotation
+    POSE_TOLERANCE = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]              # Allowed tolerance in position and rotation
 
     r = rospkg.RosPack()
     PACKAGE_PATH = r.get_path('path_follower')
@@ -118,28 +118,25 @@ class GCPathFollower:
         # Populating joint names
         if self.jointStateMsg is not None:
             for numJoint in range(len(self.jointStateMsg.name)):
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_1':
-                    joint1Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_2':
-                    joint2Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_3':
-                    joint3Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_4':
-                    joint4Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_5':
-                    joint5Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_6':
-                    joint6Index = numJoint
-                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'joint_7':
-                    joint7Index = numJoint    
+                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'shoulder_pan_joint':
+                    shoulderPanIndex = numJoint
+                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'shoulder_lift_joint':
+                    shoulderLiftIndex = numJoint
+                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'elbow_joint':
+                    elbowIndex = numJoint
+                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'wrist_1_joint':
+                    wrist1Index = numJoint
+                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'wrist_2_joint':
+                    wrist2Index = numJoint
+                if self.jointStateMsg.name[numJoint] == self.armPrefix + 'wrist_3_joint':
+                    wrist3Index = numJoint
 
-            self.jointStateArm = [self.jointStateMsg.position[joint1Index],
-                                  self.jointStateMsg.position[joint2Index],
-                                  self.jointStateMsg.position[joint3Index],
-                                  self.jointStateMsg.position[joint4Index],
-                                  self.jointStateMsg.position[joint5Index],
-                                  self.jointStateMsg.position[joint6Index],
-                                  self.jointStateMsg.position[joint7Index]]
+            self.jointStateArm = [self.jointStateMsg.position[shoulderPanIndex],
+                                  self.jointStateMsg.position[shoulderLiftIndex],
+                                  self.jointStateMsg.position[elbowIndex],
+                                  self.jointStateMsg.position[wrist1Index],
+                                  self.jointStateMsg.position[wrist2Index],
+                                  self.jointStateMsg.position[wrist3Index]]
 
     def loadCartesianPath(self):
         """
@@ -247,13 +244,12 @@ class GCPathFollower:
 
         trajActionGoal = control_msgs.msg.FollowJointTrajectoryGoal()
 
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_1')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_2')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_3')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_4')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_5')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_6')
-        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'joint_7')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'shoulder_pan_joint')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'shoulder_lift_joint')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'elbow_joint')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_1_joint')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_2_joint')
+        trajActionGoal.trajectory.joint_names.append(self.armPrefix + 'wrist_3_joint')
 
         trajActionGoal.trajectory.points = []
         timeFromStart = 1.0
@@ -261,7 +257,7 @@ class GCPathFollower:
         # fill in the joint positions (velocities of 0 mean that the arm
         # will try to stop briefly at each waypoint)
         for j in range(len(self.jointTrajectory)):
-            seconds = 0.4                                      #set this to delta_t
+            seconds = 0.04                                      #set this to delta_t
             timeFromStart = timeFromStart + seconds
 
             tempTrajPoint = trajectory_msgs.msg.JointTrajectoryPoint()

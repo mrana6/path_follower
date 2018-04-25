@@ -3,9 +3,9 @@
 
     <!-- Parameters for path follower -->
     <arg name="control_mode" default="velocity"/>
-    <arg name="data_name" default="traj_rep.txt"/>
+    <arg name="data_name" default="demo1.txt"/>
     <arg name="data_mode" default="joints"/>
-    <arg name="arm_prefix" default="j2s7s300_"/>
+    <arg name="arm_prefix" default="jaco_"/>
 
     <node name="follow_path" pkg="path_follower" type="follow_path.py" output="screen">
         <param name="control_mode" value="$(arg control_mode)"/>
